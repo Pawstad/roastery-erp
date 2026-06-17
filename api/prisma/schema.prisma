@@ -1,0 +1,261 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  SALES
+  INVENTORY
+  MONETARY
+}
+
+enum ItemType {
+  INVENTORY
+  NON_INVENTORY
+  SERVICE
+}
+
+enum SOStatus {
+  DRAFT
+  APPROVED
+  SHIPPED
+  INVOICED
+  PAID
+}
+
+enum POStatus {
+  DRAFT
+  ORDERED
+  RECEIVED
+  BILLED
+}
+
+enum BillStatus {
+  LOCKED
+  OPEN
+  PAID
+}
+
+model User {
+  id               String            @id @default(uuid())
+  name             String
+  email            String            @unique
+  password         String
+  role             Role
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  adjustments      StockAdjustment[]
+  transfers        StockTransfer[]
+  salesOrders      SalesOrder[]
+  shipments        Shipment[]
+  invoices         Invoice[]
+  payments         Payment[]
+  purchaseOrders   PurchaseOrder[]
+  itemReceipts     ItemReceipt[]
+  bills            Bill[]
+  billPayments     BillPayment[]
+}
+
+model Location {
+  id               String            @id @default(uuid())
+  name             String            @unique
+  description      String?
+  stocks           Stock[]
+  fromTransfers    StockTransfer[]   @relation("fromLocation")
+  toTransfers      StockTransfer[]   @relation("toLocation")
+  adjustments      StockAdjustment[]
+}
+
+model Item {
+  id               String            @id @default(uuid())
+  name             String            @unique
+  type             ItemType
+  sku              String            @unique
+  description      String?
+  unit             String            // e.g. "gram", "piece", "hour"
+  costPrice        Float             @default(0)
+  sellPrice        Float             @default(0)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  stocks           Stock[]
+  adjustments      StockAdjustment[]
+  transfers        StockTransfer[]
+  soItems          SalesOrderItem[]
+  poItems          PurchaseOrderItem[]
+  receiptLines     ItemReceiptLine[]
+}
+
+model Stock {
+  itemId           String
+  locationId       String
+  quantity         Float             @default(0)
+  item             Item              @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  location         Location          @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([itemId, locationId])
+}
+
+model StockAdjustment {
+  id                 String          @id @default(uuid())
+  itemId             String
+  locationId         String
+  adjustmentQuantity Float           // Negative for loss (shrinkage), positive for gain
+  reason             String          // e.g. "Yield Loss Post-Roasting", "Physical Count Correction"
+  date               DateTime        @default(now())
+  createdById        String
+  item               Item            @relation(fields: [itemId], references: [id])
+  location           Location        @relation(fields: [locationId], references: [id])
+  createdBy          User            @relation(fields: [createdById], references: [id])
+}
+
+model StockTransfer {
+  id               String            @id @default(uuid())
+  itemId           String
+  fromLocationId   String
+  toLocationId     String
+  quantity         Float
+  date             DateTime          @default(now())
+  status           String            @default("COMPLETED") // e.g. COMPLETED
+  createdById      String
+  item             Item              @relation(fields: [itemId], references: [id])
+  fromLocation     Location          @relation("fromLocation", fields: [fromLocationId], references: [id])
+  toLocation       Location          @relation("toLocation", fields: [toLocationId], references: [id])
+  createdBy        User              @relation(fields: [createdById], references: [id])
+}
+
+model SalesOrder {
+  id               String            @id @default(uuid())
+  orderNumber      String            @unique
+  customerName     String
+  date             DateTime          @default(now())
+  status           SOStatus          @default(DRAFT)
+  totalAmount      Float             @default(0)
+  createdById      String
+  createdBy        User              @relation(fields: [createdById], references: [id])
+  items            SalesOrderItem[]
+  shipment         Shipment?
+  invoice          Invoice?
+}
+
+model SalesOrderItem {
+  id               String            @id @default(uuid())
+  salesOrderId     String
+  itemId           String
+  quantity         Float
+  unitPrice        Float
+  total            Float
+  salesOrder       SalesOrder        @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  item             Item              @relation(fields: [itemId], references: [id])
+}
+
+model Shipment {
+  id               String            @id @default(uuid())
+  salesOrderId     String            @unique
+  trackingNumber   String
+  status           String            @default("SHIPPED")
+  shippedAt        DateTime          @default(now())
+  createdById      String
+  salesOrder       SalesOrder        @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  createdBy        User              @relation(fields: [createdById], references: [id])
+}
+
+model Invoice {
+  id               String            @id @default(uuid())
+  salesOrderId     String            @unique
+  invoiceNumber    String            @unique
+  issueDate        DateTime          @default(now())
+  dueDate          DateTime
+  totalAmount      Float
+  status           String            @default("UNPAID") // UNPAID, PAID
+  createdById      String
+  salesOrder       SalesOrder        @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  createdBy        User              @relation(fields: [createdById], references: [id])
+  payments         Payment[]
+}
+
+model Payment {
+  id               String            @id @default(uuid())
+  invoiceId        String
+  amountPaid       Float
+  paymentDate      DateTime          @default(now())
+  paymentMethod    String            // CASH, BANK_TRANSFER, etc.
+  transactionRef   String?
+  createdById      String
+  invoice          Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  createdBy        User              @relation(fields: [createdById], references: [id])
+}
+
+model PurchaseOrder {
+  id               String            @id @default(uuid())
+  poNumber         String            @unique
+  vendorName       String
+  date             DateTime          @default(now())
+  status           POStatus          @default(DRAFT)
+  totalAmount      Float             @default(0)
+  createdById      String
+  createdBy        User              @relation(fields: [createdById], references: [id])
+  items            PurchaseOrderItem[]
+  receipts         ItemReceipt[]
+  bill             Bill?
+}
+
+model PurchaseOrderItem {
+  id               String            @id @default(uuid())
+  purchaseOrderId  String
+  itemId           String
+  quantity         Float
+  unitPrice        Float
+  total            Float
+  purchaseOrder    PurchaseOrder     @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  item             Item              @relation(fields: [itemId], references: [id])
+}
+
+model ItemReceipt {
+  id               String            @id @default(uuid())
+  purchaseOrderId  String
+  receiptNumber    String            @unique
+  receivedDate     DateTime          @default(now())
+  createdById      String
+  purchaseOrder    PurchaseOrder     @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  createdBy        User              @relation(fields: [createdById], references: [id])
+  lines            ItemReceiptLine[]
+}
+
+model ItemReceiptLine {
+  id               String            @id @default(uuid())
+  itemReceiptId    String
+  itemId           String
+  quantityReceived Float
+  itemReceipt      ItemReceipt       @relation(fields: [itemReceiptId], references: [id], onDelete: Cascade)
+  item             Item              @relation(fields: [itemId], references: [id])
+}
+
+model Bill {
+  id               String            @id @default(uuid())
+  purchaseOrderId  String            @unique
+  billNumber       String            @unique
+  issueDate        DateTime          @default(now())
+  dueDate          DateTime
+  totalAmount      Float
+  status           BillStatus        @default(LOCKED)
+  createdById      String
+  purchaseOrder    PurchaseOrder     @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  createdBy        User              @relation(fields: [createdById], references: [id])
+  payments         BillPayment[]
+}
+
+model BillPayment {
+  id               String            @id @default(uuid())
+  billId           String
+  amountPaid       Float
+  paymentDate      DateTime          @default(now())
+  paymentMethod    String            // CASH, BANK_TRANSFER, etc.
+  referenceNumber  String?
+  createdById      String
+  bill             Bill              @relation(fields: [billId], references: [id], onDelete: Cascade)
+  createdBy        User              @relation(fields: [createdById], references: [id])
+}
